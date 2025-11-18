@@ -7,37 +7,13 @@ import pickle
 import os
 from typing import Optional, Union, Any, List, Tuple, Dict, Callable, Type
 from libs.utils.pylog import Logger
+# Import the new canvas manager
+from libs.common.screens import canvasSurface
 
 logger = Logger(__name__)
 
-# --- tkinter Setup ---
-# Attempts to import tkinter for file dialogs.
-# If it fails, file operations (save/open/export) will be disabled.
-try:
-    import tkinter as tk
-    from tkinter import filedialog
-    
-    # Helper function to create and configure a hidden, topmost tkinter root window.
-    def get_tk_root() -> tk.Tk:
-        """
-        Creates a hidden tkinter root window, sets it to be 'topmost' 
-        to appear over other windows (like pygame), and returns it.
-        This is necessary for file dialogs to function correctly.
-        
-        Returns:
-            tk.Tk: A configured, hidden root tkinter window.
-        """
-        root = tk.Tk()
-        root.withdraw()  # Hide the main window
-        try:
-            # Attempt to make the dialog window appear on top
-            root.call('wm', 'attributes', '.', '-topmost', True)
-        except Exception as e:
-            logger.warning(f"Warning: Could not set topmost attribute for tkinter: {e}")
-        return root
-except ImportError:
-    logger.warning("Warning: tkinter module not found. File dialogs will not work.")
-    tk = None  # Flag that tkinter is not available
+# --- tkinter (Moved to canvas.py) ---
+# The main application no longer needs to manage tkinter directly.
 
 # --- Utility Functions ---
 
@@ -76,7 +52,7 @@ TOOLBAR_SLIDE_DISTANCE: int = 60 # How much of the toolbar remains visible when 
 HISTORY_MENU_WIDTH: int = 300
 HISTORY_MENU_PADDING: int = 5
 HISTORY_ITEM_HEIGHT: int = 25
-MAX_VISIBLE_HISTORY_ITEMS: int = 10
+MAX_VISIBLE_HISTORY_ITEMS: int = 10 # This constant is now also used by canvas.py
 
 toolbar_btn_size: int = 60
 toolbar_btn_gap: int = 10
@@ -84,7 +60,7 @@ toolbar_btn_gap: int = 10
 # --- Main Application Function ---
 
 # The main function that runs the entire canvas application, including the game loop, event handling, and rendering.
-def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_start: bool = False) -> None:
+def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_start: bool = False, /) -> None:
     """
     Main application function for the drawing canvas.
 
@@ -103,8 +79,6 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
     screen_height: int = screen.get_height()
     
     # --- Injection Placeholders ---
-    # These lists hold references to methods injected by utility tools (e.g., camera tool).
-    # They are in lists so the lambdas in _injection_targets can modify them by index.
     injected_screen_to_canvas: List[Optional[Callable[[Tuple[int, int]], Tuple[float, float]]]] = [None]
     injected_canvas_to_screen: List[Optional[Callable[[Tuple[float, float]], Tuple[float, float]]]] = [None]
     injected_set_zoom: List[Optional[Callable[[float, Tuple[int, int]], None]]] = [None]
@@ -116,10 +90,6 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
     history_scroll_offset: int = 0 
 
     # --- Tool Method Injection System ---
-    # This dictionary maps method names to lambda functions.
-    # These lambdas act as dispatchers, allowing utility tools (like a camera/pan tool) 
-    # to "inject" their methods into the main canvas's state variables (e.g., `injected_set_zoom`).
-    # This is a form of dependency injection to keep camera logic separate from the main canvas.
     _injection_targets: Dict[str, Callable[..., None]] = {
         'hand_tool_id': 
             lambda callable_method, ToolClass, tool_instance, context: 
@@ -143,8 +113,8 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
     }
 
     # --- Dialog State ---
-    current_project_path: Optional[str] = None
-    is_dirty: bool = False # Flag for unsaved changes
+    # current_project_path: Optional[str] = None # MOVED to canvas
+    # is_dirty: bool = False # MOVED to canvas
     dialog_state: Optional[str] = None
     dialog_pending_action: Optional[str] = None
     dialog_rect: pygame.Rect = pygame.Rect(0, 0, 500, 200)
@@ -213,10 +183,16 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
         history_font = pygame.font.Font(None, 20)
 
     # --- Canvas & History State ---
+    
+    # Create the Canvas Manager instance
+    canvas: canvasSurface = canvasSurface(WORLD_WIDTH, WORLD_HEIGHT, max_history_size=30)
+    
     shared_tool_context: Dict[str, Any]
-    drawing_surface: pygame.Surface
-    history: List[Tuple[pygame.Surface, str]]
-    history_index: int
+    # Get the initial drawing surface from the canvas manager
+    drawing_surface: pygame.Surface = canvas.drawing_surface 
+    
+    # history: List[Tuple[pygame.Surface, str]] # MOVED to canvas
+    # history_index: int # MOVED to canvas
 
     # --- Nested Helper Functions ---
 
@@ -255,226 +231,71 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
                 {"name": "cancel", "btn": cancel_btn},
             ]
 
-    # Jumps to a specific state in the undo/redo history.
-    def set_history_state(index: int) -> None:
-        """
-        Sets the canvas to a specific state from the history buffer.
+    # --- NEW: Canvas Interaction Helpers ---
+    # These wrapper functions call the canvas manager and then
+    # update the main application's state (like drawing_surface)
+    # and UI (like camera zoom).
+    
+    def update_canvas_state(new_surface: Optional[pygame.Surface]):
+        """Updates the main drawing surface and the shared context."""
+        nonlocal drawing_surface, shared_tool_context
+        if new_surface:
+            drawing_surface = new_surface
+            shared_tool_context["drawing_surface"] = drawing_surface
 
-        Args:
-            index: The index in the `history` list to load.
-        """
-        nonlocal history_index, is_dirty, drawing_surface, shared_tool_context
-        
-        history_index = index
-        # Load a copy of the surface from history
-        shared_tool_context["drawing_surface"] = history[history_index][0].copy()
-        drawing_surface = shared_tool_context["drawing_surface"]
-        is_dirty = True # Changing history state counts as an unsaved change
-        
-    # Adds the current canvas state as a new entry in the history buffer.
-    def add_history(action_name: str) -> None:
-        """
-        Saves the current state of `drawing_surface` to the history list.
-        This is called after a drawing action is completed.
+    def add_history_and_scroll(action_name: str) -> None:
+        """Adds the current state to history and updates scroll."""
+        nonlocal history_scroll_offset
+        # Pass the *live* surface to the canvas manager
+        new_scroll = canvas.add_history(action_name, drawing_surface)
+        if new_scroll is not None:
+            history_scroll_offset = new_scroll
 
-        Args:
-            action_name: A descriptive name for the action (e.g., "Draw Line").
-        """
-        nonlocal history, history_index, is_dirty, drawing_surface, history_scroll_offset
-        
-        # If we undid and then drew, clear the "redo" future
-        if history_index < len(history) - 1:
-            history = history[:history_index + 1]
-            
-        # Limit history size
-        if len(history) >= MAX_HISTORY_SIZE:
-            history.pop(0)
-            
-        # Add a copy of the current surface
-        history.append((drawing_surface.copy(), action_name))
-        history_index = len(history) - 1
-        is_dirty = True
-        
-        # Auto-scroll history menu to the bottom
-        max_scroll: int = max(0, len(history) - MAX_VISIBLE_HISTORY_ITEMS)
-        history_scroll_offset = max_scroll
-        
-    # Reverts to the previous state in the history.
-    def undo() -> None:
-        """Moves the `history_index` back by one and loads that state."""
-        nonlocal history_index, is_dirty, drawing_surface
-        if history_index > 0:
-            set_history_state(history_index - 1)
+    def undo_action() -> None:
+        """Undoes the last action and updates the canvas."""
+        new_surface = canvas.undo()
+        update_canvas_state(new_surface)
 
-    # Moves to the next state in the history (if an undo was performed).
-    def redo() -> None:
-        """Moves the `history_index` forward by one and loads that state."""
-        nonlocal history_index, is_dirty, drawing_surface
-        if history_index < len(history) - 1:
-            set_history_state(history_index + 1)
-
-    # Resets the canvas to a blank state and clears the history.
-    def clear_canvas() -> None:
-        """
-        Fills the `drawing_surface` with white, resets the history list, 
-        and sets the project path to None.
-        """
-        nonlocal is_dirty, current_project_path, history, history_index, drawing_surface, shared_tool_context
-        drawing_surface.fill("White")
-        history = []
-        add_history("Initial") # Add the blank state as the first history item
-        is_dirty = False
-        current_project_path = None
+    def redo_action() -> None:
+        """Redoes the last action and updates the canvas."""
+        new_surface = canvas.redo()
+        update_canvas_state(new_surface)
+    
+    def clear_canvas_action() -> None:
+        """Clears the canvas, resets history, and updates the view."""
+        new_surface = canvas.clear_canvas()
+        update_canvas_state(new_surface)
         # Reset camera zoom/pan
         if injected_set_zoom[0]:
             injected_set_zoom[0](shared_tool_context["zoom_level"], (screen_width // 2, screen_height // 2))
 
-    # Saves the current canvas state to the `current_project_path` using pickle.
-    def save_vecbo() -> bool:
-        """
-        Saves the current canvas to the file specified by `current_project_path`.
-        If no path is set, it calls `save_as_vecbo()`.
-        The canvas is saved as a pickled dictionary.
+    def save_vecbo_action() -> bool:
+        """Saves the current canvas state."""
+        # Pass the live surface to be saved
+        return canvas.save_vecbo(drawing_surface)
 
-        Returns:
-            True if saving was successful, False otherwise.
-        """
-        nonlocal is_dirty, current_project_path
-        if not current_project_path:
-            return save_as_vecbo()
-        
-        if tk is None: 
-            logger.warning("Cannot save: tkinter not available.")
-            return False
+    def save_as_vecbo_action() -> bool:
+        """Saves the current canvas state to a new file."""
+        # Pass the live surface to be saved
+        return canvas.save_as_vecbo(drawing_surface)
 
-        try:
-            # Prepare data for pickling
-            data: Dict[str, Any] = {
-                "version": 1,
-                "drawing_surface": pygame.image.tostring(drawing_surface, 'RGBA'),
-                "size": (WORLD_WIDTH, WORLD_HEIGHT)
-            }
-            with open(current_project_path, 'wb') as f:
-                pickle.dump(data, f)
-            is_dirty = False
-            logger.info(f"Project saved to {current_project_path}")
+    def open_file_action() -> bool:
+        """Opens a .vecbo file and updates the canvas."""
+        new_surface = canvas.open_file()
+        if new_surface:
+            update_canvas_state(new_surface)
+            # Reset camera
+            if injected_set_zoom[0]:
+                injected_set_zoom[0](shared_tool_context["zoom_level"], (screen_width // 2, screen_height // 2))
             return True
-        except Exception as e:
-            logger.error(f"Error saving file: {e}")
-            return False
-
-    # Opens a "Save As" dialog to get a new file path and then saves to it.
-    def save_as_vecbo() -> bool:
-        """
-        Uses a tkinter file dialog to ask the user for a save location.
-        If a path is chosen, it sets `current_project_path` and calls `save_vecbo()`.
-
-        Returns:
-            True if saving was successful, False otherwise.
-        """
-        nonlocal is_dirty, current_project_path
-        if tk is None: 
-            logger.warning("Cannot save: tkinter not available.")
-            return False
-
-        root = get_tk_root()
-        file_path: Optional[str] = filedialog.asksaveasfilename(
-            defaultextension=".vecbo",
-            filetypes=[("DrawingGuess Vector Board", "*.vecbo")],
-            title="Save Project As"
-        )
-        root.destroy()
-        
-        if file_path:
-            current_project_path = file_path
-            return save_vecbo()
-        return False
-        
-    # Opens an "Open" dialog to load a `.vecbo` file.
-    def open_file() -> bool:
-        """
-        Uses a tkinter file dialog to ask the user for a file to open.
-        If a file is chosen, it loads the pickled data, updates the
-        `drawing_surface`, and resets the history.
-
-        Returns:
-            True if loading was successful, False otherwise.
-        """
-        nonlocal is_dirty, current_project_path, history, history_index, drawing_surface, shared_tool_context
-        if tk is None: 
-            logger.warning("Cannot open: tkinter not available.")
-            return False
-
-        root = get_tk_root()
-        file_path: Optional[str] = filedialog.askopenfilename(
-            defaultextension=".vecbo",
-            filetypes=[("DrawingGuess Vector Board", "*.vecbo")],
-            title="Open Project"
-        )
-        root.destroy()
-        
-        if file_path:
-            try:
-                with open(file_path, 'rb') as f:
-                    data: Dict[str, Any] = pickle.load(f)
-                
-                # Reconstruct the surface from pickled data
-                surface_data: bytes = data["drawing_surface"]
-                surf_size: Tuple[int, int] = data["size"]
-                new_surf: pygame.Surface = pygame.image.fromstring(surface_data, surf_size, 'RGBA')
-
-                # Update main state
-                shared_tool_context["drawing_surface"] = new_surf
-                drawing_surface = new_surf
-                current_project_path = file_path
-                is_dirty = False
-                
-                # Reset history with the loaded file
-                history = [(drawing_surface.copy(), f"Opened: {os.path.basename(file_path)}")]
-                history_index = 0
-                
-                # Reset camera
-                if injected_set_zoom[0]:
-                    injected_set_zoom[0](shared_tool_context["zoom_level"], (screen_width // 2, screen_height // 2))
-
-                logger.info(f"Project loaded from {file_path}")
-                return True
-            except Exception as e:
-                logger.error(f"Error opening file: {e}")
-                return False
         return False
 
-    # Opens a "Save As" dialog to export the canvas as a `.png` or `.jpg`.
-    def export_as_image() -> bool:
-        """
-        Uses a tkinter file dialog to ask the user for a save location
-        to export the canvas as a PNG or JPEG image.
+    def export_as_image_action() -> bool:
+        """Exports the current canvas as a PNG or JPG."""
+        # Pass the live surface to be exported
+        return canvas.export_as_image(drawing_surface)
 
-        Returns:
-            True if exporting was successful, False otherwise.
-        """
-        nonlocal is_dirty, current_project_path
-        if tk is None: 
-            logger.warning("Cannot export: tkinter not available.")
-            return False
-
-        root = get_tk_root()
-        file_path: Optional[str] = filedialog.asksaveasfilename(
-            defaultextension=".png",
-            filetypes=[("PNG Image", "*.png"), ("JPEG Image", "*.jpg;*.jpeg")],
-            title="Export Canvas as Image"
-        )
-        root.destroy()
-        
-        if file_path:
-            try:
-                pygame.image.save(drawing_surface, file_path)
-                logger.info(f"Canvas exported to {file_path}")
-                return True
-            except Exception as e:
-                logger.error(f"Error exporting image: {e}")
-                return False
-        return False
+    # --- (Old canvas helper functions removed) ---
 
     # --- Initial State Setup ---
     
@@ -495,26 +316,16 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
         "click_on_ui": False,
         "mouse_pos": (0,0),
         "toolbar_current_y": toolbar_rect.y,
-        "drawing_surface": None, # Will be set below
-        "add_history": add_history, 
+        "drawing_surface": drawing_surface, # Use the surface from canvas manager
+        "add_history": add_history_and_scroll, # Use the new wrapper
         "zoom_level": 1.0,  
         "pan_offset": (initial_offset_x, initial_offset_y), 
         "canvas_mouse_pos": (0, 0), # Mouse position relative to the canvas
         "is_panning": False,
         "pan_start_pos": (0, 0),
         "pan_start_offset": (0, 0),
-        "previous_tool_id": "none" # Used for the spacebar-pan functionality
+        "previous_tool_id": "none"
     }
-    
-    # Create the main drawing surface
-    drawing_surface = pygame.Surface((WORLD_WIDTH, WORLD_HEIGHT))
-    drawing_surface.fill("White")
-    shared_tool_context["drawing_surface"] = drawing_surface
-    
-    # Initialize history
-    history = [(drawing_surface.copy(), "Initial")]
-    history_index = 0
-    MAX_HISTORY_SIZE: int = 30
     
     # --- Tool Loading ---
     
@@ -561,7 +372,6 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
     zoom_slider_x_start = toolbar_btn_x + 10 
     
     # --- Injection Validation ---
-    # Critical check: ensure a utility tool provided all necessary camera/coord functions
     if injected_screen_to_canvas[0] is None or injected_canvas_to_screen[0] is None or injected_set_zoom[0] is None or injected_apply_constraints[0] is None:
         raise RuntimeError("FATAL ERROR: Essential Canvas Systems (Coordinate Math, Camera Control) failed to inject. A utility tool must provide ALL of these functions.")
     
@@ -585,8 +395,7 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
                 
                 # Auto-resize large cursors
                 if not cursor_size:
-                    if cursor_surf.get_width() > 64 or cursor_surf.get_height() > 64:
-                        cursor_size = (64, 64) 
+                    cursor_size = cursor_surf.get_size()
                 
                 if cursor_size:
                     try:
@@ -631,7 +440,6 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
         shared_tool_context["click_on_ui"] = False
         
         # --- Dialog Event Handling ---
-        # If a dialog is open, it consumes all events
         if dialog_state is not None:
             for event in events[:]: # Iterate over a copy
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
@@ -649,22 +457,20 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
                         elif action_taken == "dont_save":
                             # Perform the pending action without saving
                             dialog_state = None
-                            if dialog_pending_action == "new_canvas": clear_canvas()
-                            elif dialog_pending_action == "open_file": open_file()
-                            elif dialog_pending_action == "exit": running = False
+                            running = False
+                            continue
                         
                         elif action_taken == "save":
                             # Try to save, and if successful, perform the pending action
-                            if current_project_path: save_vecbo()
-                            else: save_as_vecbo()
-                            if not is_dirty: # Check if save was successful
+                            if canvas.current_project_path: save_vecbo_action()
+                            else: save_as_vecbo_action()
+                            if not canvas.is_dirty: # Check if save was successful
                                 dialog_state = None
-                                if dialog_pending_action == "new_canvas": clear_canvas()
-                                elif dialog_pending_action == "open_file": open_file()
-                                elif dialog_pending_action == "exit": running = False
+                                running = False
+                                continue
 
                         elif action_taken == "export":
-                            export_as_image()
+                            export_as_image_action()
                     
                     shared_tool_context["click_on_ui"] = True
                     events.remove(event)
@@ -679,13 +485,13 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
                 
                 # Handle custom event for 'open_file_on_start'
                 if event.type == pygame.USEREVENT + 1:
-                    open_file()
+                    open_file_action()
                     pygame.time.set_timer(pygame.USEREVENT + 1, 0) # Stop timer
                     continue
 
                 # Handle window close
                 if event.type == pygame.QUIT:
-                    if is_dirty:
+                    if canvas.is_dirty:
                         set_dialog("confirm_action", "exit")
                         shared_tool_context["click_on_ui"] = True
                     else:
@@ -702,7 +508,7 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
                     if shared_tool_context["menu_open"] == "history" and history_placeholder_rect.collidepoint(mouse_pos):
                         if event.y > 0: history_scroll_offset = max(0, history_scroll_offset - 1)
                         elif event.y < 0:
-                            max_scroll = max(0, len(history) - MAX_VISIBLE_HISTORY_ITEMS)
+                            max_scroll = max(0, len(canvas.history) - MAX_VISIBLE_HISTORY_ITEMS)
                             history_scroll_offset = min(max_scroll, history_scroll_offset + 1)
                         shared_tool_context["click_on_ui"] = True 
                     
@@ -716,7 +522,6 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
                     continue
 
                 # --- Utility Tool Event Handling ---
-                # Give utility tools (like camera) first priority
                 for tool in utility_tools_to_draw:
                     if tool.handle_event(event, shared_tool_context):
                         shared_tool_context["click_on_ui"] = True
@@ -759,15 +564,15 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
                     # Ctrl/Cmd+Z: Undo
                     elif event.key == pygame.K_z:
                         if is_ctrl_or_cmd:
-                            if is_shift: redo() # Ctrl/Cmd+Shift+Z: Redo
-                            else: undo()
+                            if is_shift: redo_action() # Ctrl/Cmd+Shift+Z: Redo
+                            else: undo_action()
                     # Ctrl/Cmd+Y: Redo
                     elif event.key == pygame.K_y:
-                        if is_ctrl_or_cmd and not is_shift: redo()
+                        if is_ctrl_or_cmd and not is_shift: redo_action()
                     
                     # Shift+E: Export
                     elif event.key == pygame.K_e and is_shift:
-                        export_as_image()
+                        export_as_image_action()
                     
                 if event.type == pygame.KEYUP:
                     active_tool_id = shared_tool_context["active_tool_id"]
@@ -800,15 +605,12 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
                             
                     # --- File Menu Clicks ---
                     elif shared_tool_context["menu_open"] == "file":
-                        # This section dynamically creates buttons for hit-testing
-                        # The actual rendering happens in the rendering section
                         file_menu_buttons: List[SolidButton] = []
                         file_menu_hot_zone = [file_btn.rect]
                         btn_y: int = file_btn.rect.bottom
                         btn_w: int = 300
                         btn_h: int = 40
                         
-                        # Local helper function to create and track buttons for the "File" dropdown menu.
                         def add_file_btn(text: str) -> None:
                             nonlocal btn_y
                             btn: SolidButton = SolidButton(
@@ -823,7 +625,7 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
                         
                         add_file_btn("New Whiteboard")
                         add_file_btn("Open From...")
-                        if current_project_path:
+                        if canvas.current_project_path:
                             add_file_btn("Save")
                         add_file_btn("Save as... (.vecbo)")
                         add_file_btn("Export as... (.png)")
@@ -833,19 +635,19 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
                         for btn in file_menu_buttons:
                             if btn.rect.collidepoint(mouse_pos):
                                 if btn.text == "New Whiteboard":
-                                    if is_dirty: set_dialog("confirm_action", "new_canvas")
-                                    else: clear_canvas()
+                                    if canvas.is_dirty: set_dialog("confirm_action", "new_canvas")
+                                    else: clear_canvas_action()
                                 elif btn.text == "Open From...":
-                                    if is_dirty: set_dialog("confirm_action", "open_file")
-                                    else: open_file()
+                                    if canvas.is_dirty: set_dialog("confirm_action", "open_file")
+                                    else: open_file_action()
                                 elif btn.text == "Save":
-                                    save_vecbo()
+                                    save_vecbo_action()
                                 elif btn.text == "Save as... (.vecbo)":
-                                    save_as_vecbo()
+                                    save_as_vecbo_action()
                                 elif btn.text == "Export as... (.png)":
-                                    export_as_image()
+                                    export_as_image_action()
                                 elif btn.text == "Back to Main Menu": 
-                                    if is_dirty: set_dialog("confirm_action", "exit")
+                                    if canvas.is_dirty: set_dialog("confirm_action", "exit")
                                     else: running = False
                                 
                                 shared_tool_context["menu_open"] = None 
@@ -867,20 +669,21 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
                             item_y_start: int = clip_rect.y
                             visible_items_indices: range = range(history_scroll_offset, history_scroll_offset + MAX_VISIBLE_HISTORY_ITEMS)
                             
-                            # Check for click on each visible history item
                             for i, history_i in enumerate(visible_items_indices):
-                                if history_i >= len(history): break
+                                if history_i >= len(canvas.history): break
                                 
                                 item_rect: pygame.Rect = pygame.Rect(clip_rect.x, item_y_start + (i * HISTORY_ITEM_HEIGHT), clip_rect.width, HISTORY_ITEM_HEIGHT)
                                 if item_rect.collidepoint(mouse_pos) and event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                                     
-                                    set_history_state(history_i)
+                                    # Call the canvas manager to set the state
+                                    new_surf = canvas.set_history_state(history_i)
+                                    # Update the main app's surface
+                                    update_canvas_state(new_surf)
                                     
                                     shared_tool_context["menu_open"] = None
                                     break
 
                 # --- Tool-Specific Menu Handling ---
-                # e.g., Color picker, size slider
                 tool_menu_is_open: bool = False
                 menu_open_id: Optional[str] = shared_tool_context["menu_open"]
                 
@@ -929,7 +732,6 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
                     continue 
 
                 # --- Active Tool Event Handling ---
-                # If no UI was clicked, pass the event to the active tool
                 if event not in events:
                     continue
 
@@ -938,7 +740,6 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
                 if active_tool_instance:
                     is_space_up: bool = (event.type == pygame.KEYUP and event.key == pygame.K_SPACE)
 
-                    # Don't pass space-up event to the tool
                     if not is_space_up:
                         if active_tool_instance.handle_event(event, shared_tool_context):
                             if event in events: events.remove(event)
@@ -946,11 +747,7 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
                 if shared_tool_context["click_on_ui"]:
                     if event in events: events.remove(event)
                     continue
-            
-        # =================================================================================
-        # --- STATE UPDATES ---
-        # =================================================================================
-        
+
         # --- Re-create File Menu (for rendering and click-off logic) ---
         file_menu_buttons = []
         file_menu_hot_zone = [file_btn.rect]
@@ -959,7 +756,6 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
             btn_w = 300
             btn_h = 40
             
-            # Local helper function to create buttons for *rendering* the "File" dropdown menu.
             def add_file_btn_render(text: str) -> None:
                 nonlocal btn_y
                 btn = SolidButton(
@@ -974,14 +770,13 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
             
             add_file_btn_render("New Whiteboard")
             add_file_btn_render("Open From...")
-            if current_project_path:
+            if canvas.current_project_path:
                 add_file_btn_render("Save")
             add_file_btn_render("Save as... (.vecbo)")
             add_file_btn_render("Export as... (.png)")
             add_file_btn_render("Back to Main Menu")
 
         # --- Click-off-Menu Logic (Frame-based) ---
-        # This handles clicks that were not processed in the event loop
         menu = shared_tool_context["menu_open"]
         if menu == "file" or menu == "history":
             hot_zone = file_menu_hot_zone if menu == "file" else history_menu_hot_zone
@@ -991,9 +786,6 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
                     is_on_hotzone = True
                     break
             if not is_on_hotzone:
-                # If mouse is not in the hot zone, a click would have closed it.
-                # Since no click is registered here, we just check position.
-                # The actual click handling is in the event loop.
                 pass
         
         # --- Toolbar Sliding Logic ---
@@ -1001,22 +793,20 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
         toolbar_target_y: int
 
         if shared_tool_context["menu_open"] is not None or dialog_state is not None:
-            toolbar_target_y = toolbar_visible_y # Keep visible if menu or dialog is open
+            toolbar_target_y = toolbar_visible_y
         elif is_drawing:
-            toolbar_target_y = toolbar_hidden_y # Hide when drawing
+            toolbar_target_y = toolbar_hidden_y
         else:
-            # Show if mouse is near bottom or over the toolbar
             if mouse_pos[1] > screen_height - 20 or toolbar_rect.collidepoint(mouse_pos):
                 toolbar_target_y = toolbar_visible_y
             else:
                 toolbar_target_y = toolbar_hidden_y
             
-        # Lerp for smooth animation
         toolbar_current_y: float = lerp(toolbar_rect.y, toolbar_target_y, 0.2)
         toolbar_rect.y = round(toolbar_current_y)
         shared_tool_context["toolbar_current_y"] = toolbar_rect.y
         
-        # Update tool button positions based on toolbar's animated Y
+        # Update tool button positions
         for tool in loaded_tool_instances:
             if hasattr(tool, 'button'): 
                 tool.update_button_pos(tool.button.rect.x, toolbar_rect.y + 10)
@@ -1025,7 +815,6 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
             tool.update_button_pos(zoom_slider_x_start, toolbar_rect.y + 25)
 
         # --- Apply Camera Constraints ---
-        # (e.g., prevent panning too far)
         if injected_apply_constraints[0]:
             injected_apply_constraints[0]()
 
@@ -1033,13 +822,11 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
         # --- DRAWING / RENDERING ---
         # =================================================================================
         
-        # Fill background
         screen.fill((80, 80, 80)) 
         
         # --- Draw Canvas ---
         if injected_screen_to_canvas[0] and injected_canvas_to_screen[0]:
             
-            # Find the visible portion of the canvas
             canvas_tl_x: float
             canvas_tl_y: float
             canvas_br_x: float
@@ -1050,7 +837,7 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
             canvas_rect_w: float = canvas_br_x - canvas_tl_x
             canvas_rect_h: float = canvas_br_y - canvas_tl_y
             
-            # Clip the visible rect to the bounds of the drawing surface
+            # Use the live drawing_surface from the main app
             visible_canvas_rect: pygame.Rect = pygame.Rect(
                 canvas_tl_x, 
                 canvas_tl_y,
@@ -1058,13 +845,10 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
                 canvas_rect_h
             ).clip(drawing_surface.get_rect())
             
-            # Only draw if the visible area is valid
             if visible_canvas_rect.width > 0 and visible_canvas_rect.height > 0:
                 try:
-                    # Get a subsurface of just the visible part
                     sub_surface: pygame.Surface = drawing_surface.subsurface(visible_canvas_rect)
                     
-                    # Find where this subsurface should be drawn on the screen
                     dest_x: float
                     dest_y: float
                     dest_x, dest_y = injected_canvas_to_screen[0](visible_canvas_rect.topleft)
@@ -1072,12 +856,10 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
                     dest_h: float = visible_canvas_rect.height * shared_tool_context["zoom_level"]
                     
                     if dest_w >= 1 and dest_h >= 1:
-                        # Scale the subsurface and blit it
                         scaled_canvas: pygame.Surface = pygame.transform.scale(sub_surface, (int(dest_w), int(dest_h)))
                         screen.blit(scaled_canvas, (int(dest_x), int(dest_y)))
 
                 except ValueError as e:
-                    # This can happen if rounding errors make the rect invalid
                     logger.warning(f"Subsurface error: {e}. Rect: {visible_canvas_rect}")
                     pass
         
@@ -1092,17 +874,14 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
         
         active_tool_instance = tool_id_to_instance.get(shared_tool_context.get("active_tool_id"))
         
-        # Default cursor state
         pygame.mouse.set_visible(True)
         pygame.mouse.set_cursor(pygame.SYSTEM_CURSOR_ARROW)
 
-        # Special cursor for panning
         if hand_tool_id[0] and shared_tool_context["is_panning"] and shared_tool_context.get("active_tool_id") == hand_tool_id[0]:
             active_tool_instance = tool_id_to_instance.get(hand_tool_id[0])
             if active_tool_instance:
                 pygame.mouse.set_visible(False) 
                 if active_tool_instance.custom_cursor_surf:
-                    # Draw custom "grabbing" cursor
                     hotspot_x: float = mouse_pos[0] - active_tool_instance.custom_cursor_hotspot[0]
                     hotspot_y: float = mouse_pos[1] - active_tool_instance.custom_cursor_hotspot[1]
                     offset_x: float = active_tool_instance.custom_cursor_offset[0]
@@ -1110,37 +889,31 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
                     draw_pos: Tuple[float, float] = (hotspot_x + offset_x, hotspot_y + offset_y)
                     screen.blit(active_tool_instance.custom_cursor_surf, draw_pos)
                 else:
-                    # Fallback to system hand cursor
                     pygame.mouse.set_visible(True)
                     try:
                         pygame.mouse.set_cursor(pygame.SYSTEM_CURSOR_HAND)
                     except: 
                         pygame.mouse.set_cursor(pygame.SYSTEM_CURSOR_ARROW)
 
-        # Draw tool-specific cursors (brush, eraser, etc.)
         elif is_on_canvas and active_tool_instance:
             
             cursor_info: Dict[str, Any] = active_tool_instance.get_cursor_draw_info(shared_tool_context)
             cursor_type: str = cursor_info.get("type", "custom")
             
-            # Draw a circle cursor for drawing tools
             if active_tool_instance.is_drawing_tool and cursor_type in ["custom", "circle"]:
                 
                 radius: int = cursor_info.get("radius", 1) 
                 fill_color: Tuple[int, int, int] = cursor_info.get("color", (0, 0, 0))
                 
-                # Scale radius by zoom
                 screen_radius: int = max(1, int(radius * shared_tool_context["zoom_level"]))
 
                 pygame.mouse.set_visible(False) 
                 
-                # Draw cursor outline
                 pygame.draw.circle(screen, fill_color, mouse_pos, screen_radius)
                 pygame.draw.circle(screen, (0, 0, 0), mouse_pos, screen_radius, width=2)
                 if screen_radius > 3:
                     pygame.draw.circle(screen, (255, 255, 255), mouse_pos, screen_radius - 2, width=1)
             
-            # Draw custom icon cursors (e.g., for selection tool)
             if active_tool_instance.custom_cursor_surf:
                 pygame.mouse.set_visible(False)
                 hotspot_x = mouse_pos[0] - active_tool_instance.custom_cursor_hotspot[0]
@@ -1151,14 +924,12 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
                 screen.blit(active_tool_instance.custom_cursor_surf, draw_pos)
             
             elif not active_tool_instance.custom_cursor_surf and cursor_type == "custom":
-                # Fallback for tools that want a custom cursor but don't provide one
                 pygame.mouse.set_visible(True)
                 pygame.mouse.set_cursor(pygame.SYSTEM_CURSOR_ARROW)
         
         # --- Draw Top Bar ---
         pygame.draw.rect(screen, MENU_BG_COLOR, top_bar_rect)
         
-        # Highlight active menu button
         if shared_tool_context["menu_open"] == "file":
             highlight_rect: pygame.Rect = file_btn.rect.inflate(-8, -8)
             pygame.draw.rect(screen, MENU_ACTIVE_BG_COLOR, highlight_rect, border_radius=10)
@@ -1167,7 +938,6 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
             highlight_rect = history_btn.rect.inflate(-8, -8)
             pygame.draw.rect(screen, MENU_ACTIVE_BG_COLOR, highlight_rect, border_radius=10)
         
-        # Draw top bar button text
         screen.blit(file_btn.text_surf, file_btn.text_rect)
         screen.blit(history_btn.text_surf, history_btn.text_rect)
         
@@ -1177,7 +947,6 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
                 
                 pygame.draw.rect(screen, MENU_DROPDOWN_BG_COLOR, btn.rect)
                 
-                # Highlight on hover
                 if btn.rect.collidepoint(mouse_pos):
                     highlight_rect = btn.rect.inflate(-4, -4)
                     pygame.draw.rect(screen, MENU_HOVER_BG_COLOR, highlight_rect, border_radius=10)
@@ -1192,22 +961,22 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
         # --- Draw History Menu (if open) ---
         if shared_tool_context["menu_open"] == "history":
             pygame.draw.rect(screen, MENU_DROPDOWN_BG_COLOR, history_placeholder_rect)
-            # Set a clipping rect to keep items inside the menu
             clip_rect = history_placeholder_rect.inflate(-4, -HISTORY_MENU_PADDING * 2)
             screen.set_clip(clip_rect)
             
             item_y_start = clip_rect.y
             visible_items_indices = range(history_scroll_offset, history_scroll_offset + MAX_VISIBLE_HISTORY_ITEMS)
             
+            # Read from canvas.history
             for i, history_i in enumerate(visible_items_indices):
-                if history_i >= len(history): break
+                if history_i >= len(canvas.history): break
                 
-                text: str = f"{history_i + 1}. {history[history_i][1]}"
+                text: str = f"{history_i + 1}. {canvas.history[history_i][1]}"
                 item_rect = pygame.Rect(clip_rect.x, item_y_start + (i * HISTORY_ITEM_HEIGHT), clip_rect.width, HISTORY_ITEM_HEIGHT)
                 
                 color: Tuple[int, int, int] = MENU_TEXT_COLOR_MUTED
                 
-                is_selected: bool = (history_i == history_index)
+                is_selected: bool = (history_i == canvas.history_index) # Read from canvas.history_index
                 is_hovered: bool = item_rect.collidepoint(mouse_pos) and shared_tool_context["menu_open"] == "history"
 
                 if is_selected:
@@ -1231,7 +1000,6 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
         
         active_tool_id = shared_tool_context.get("active_tool_id")
         
-        # Draw all tool buttons
         for tool in loaded_tool_instances: 
             if hasattr(tool, 'button'): 
                 
@@ -1245,35 +1013,29 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
                 is_active: bool = tool.registryId == active_tool_id
                 is_menu_open: bool = shared_tool_context.get("menu_open") == tool.registryId
                 
-                # Draw highlight for active or open tool
                 if is_active or is_menu_open:
                     pygame.draw.rect(screen, highlight_color, tool.button.rect.inflate(4, 4))
                     
                 tool.draw(screen, shared_tool_context)
             
-        # Draw utility tools (like zoom slider)
         for tool in utility_tools_to_draw:
             tool.draw(screen, shared_tool_context) 
             
         # --- Draw Dialog (if open) ---
         if dialog_state is not None:
-            # Dark overlay
             overlay = pygame.Surface((screen_width, screen_height), pygame.SRCALPHA)
             overlay.fill((0, 0, 0, 180))
             screen.blit(overlay, (0, 0))
             
-            # Dialog box
             pygame.draw.rect(screen, (230, 230, 230), dialog_rect, border_radius=5)
             pygame.draw.rect(screen, (100, 100, 100), dialog_rect, 2, border_radius=5)
             
-            # Text
             title_surf = dialog_title_font.render("You have unsaved changes!", True, (0,0,0))
             screen.blit(title_surf, title_surf.get_rect(centerx=dialog_rect.centerx, y=dialog_rect.y + 20))
             
             prompt_surf = dialog_font.render("What would you like to do?", True, (50,50,50))
             screen.blit(prompt_surf, prompt_surf.get_rect(centerx=dialog_rect.centerx, y=dialog_rect.y + 60))
             
-            # Buttons
             for item in dialog_buttons:
                 item["btn"].draw(screen)
             
@@ -1282,6 +1044,5 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
         clock.tick(60)
 
     # --- Cleanup ---
-    # Restore cursor visibility on exit
     pygame.mouse.set_cursor(pygame.SYSTEM_CURSOR_ARROW)
     pygame.mouse.set_visible(True)

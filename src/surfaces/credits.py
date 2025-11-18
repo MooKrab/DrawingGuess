@@ -25,12 +25,12 @@ CREDITS_DATA: List[Tuple[Any, ...]] = [
 
     ("Designer", 40, "center"),
     ("Suphakorn Khamwongsa", "Sorawit Nuamwat", 30, "columns"),
-    ("Test1", "Test2", 30, "columns"),
     ("", 30, "spacer"),
 
     ("Tester", 40, "center"),
-    ("Sorawit Nuamwat", "Test1", 30, "columns"),
-    ("Test2", "Test3", 30, "columns"),
+    ("Sorawit Nuamwat", "Sota", 30, "columns"),
+    ("Idea", "Pai", 30, "columns"),
+    ("Tan", "Ken", 30, "columns"),
     ("", 30, "spacer"),
 
     ("Special Thanks", 40, "center"),
