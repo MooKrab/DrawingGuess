@@ -12,7 +12,7 @@ import os
 import sys
 import pygame
 import random
-from typing import Any
+from typing import Any, Dict, List, Tuple, Optional
 # Import surfaces (screens) to navigate to
 from surfaces import SettingsSurface, CreditsSurface, SelSurface
 from libs.common.components import ImageButton
@@ -38,6 +38,136 @@ DIALOG_CENTER_Y: int = SCREEN_HIGH // 2
 
 screen: pygame.Surface = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HIGH))
 pygame.display.set_caption("DrawingGuess")
+
+# --- BubblePencil Pop Effect Classes ---
+class PopEffect:
+    def __init__(self, image: pygame.Surface, x: int, y: int):
+        # Randomly scale the image (maintain 1:1 aspect ratio as requested)
+        scale_factor = random.uniform(0.5, 1.5)
+        new_width = int(image.get_width() * scale_factor)
+        new_height = int(image.get_height() * scale_factor)
+        
+        # Scale and copy the image
+        self.image = pygame.transform.smoothscale(image, (new_width, new_height)).copy()
+        
+        self.rect = self.image.get_rect(topleft=(x, y))
+        self.alpha = 0.0
+        self.state = 0 # 0: Fade In, 1: Hold, 2: Fade Out
+        self.timer = 0
+        
+        # Randomize timing slightly
+        self.fade_speed = random.uniform(2, 4)
+        self.hold_duration = random.randint(60, 180) # frames (approx 1-3 seconds at 60fps)
+
+    def update(self) -> bool:
+        # Returns False if dead (animation finished)
+        if self.state == 0: # Fade In
+            self.alpha += self.fade_speed
+            if self.alpha >= 255:
+                self.alpha = 255
+                self.state = 1
+        elif self.state == 1: # Hold
+            self.timer += 1
+            if self.timer >= self.hold_duration:
+                self.state = 2
+        elif self.state == 2: # Fade Out
+            self.alpha -= self.fade_speed
+            if self.alpha <= 0:
+                return False
+        
+        # Apply alpha
+        self.image.set_alpha(int(self.alpha))
+        return True
+
+    def draw(self, surface: pygame.Surface):
+        surface.blit(self.image, self.rect)
+
+class PopManager:
+    def __init__(self):
+        self.assets: Dict[str, pygame.Surface] = {}
+        self.active_pops: List[Dict[str, Any]] = [] # List of dicts: { 'name': str, 'obj': PopEffect }
+        self.loaded = False
+        # Path adjusted to match project structure: src/assets/textures/environments...
+        self.base_path = os.path.abspath('src/assets/textures/environments/.BubblePencil/Extras')
+
+    def load_assets(self):
+        if self.loaded: return
+        
+        if not os.path.exists(self.base_path):
+            # Only log once to avoid spam if folder doesn't exist
+            # logger.warning(f"BubblePencil Extras path not found: {self.base_path}")
+            self.loaded = True 
+            return
+        
+        logger.info(f"Loading BubblePencil extras from: {self.base_path}")
+        for filename in os.listdir(self.base_path):
+            if filename.startswith("Pop_") and filename.endswith(".png"):
+                full_path = os.path.join(self.base_path, filename)
+                try:
+                    img = pygame.image.load(full_path).convert_alpha()
+                    self.assets[filename] = img
+                except Exception as e:
+                    logger.warning(f"Failed to load pop image {filename}: {e}")
+        self.loaded = True
+
+    def update(self, screen_width: int, screen_height: int):
+        if not self.assets: return
+
+        # Update active pops and remove dead ones
+        alive_pops = []
+        for p in self.active_pops:
+            if p['obj'].update():
+                alive_pops.append(p)
+        self.active_pops = alive_pops
+
+        # Attempt to spawn a new pop
+        # Chance to spawn: ~1% per frame, max 5 concurrent
+        if random.random() < 0.01 and len(self.active_pops) < 5:
+            available_names = list(self.assets.keys())
+            
+            # Ensure we don't spawn the same file if it's already on screen
+            active_names = {p['name'] for p in self.active_pops}
+            candidates = [n for n in available_names if n not in active_names]
+            
+            if candidates:
+                chosen_name = random.choice(candidates)
+                img = self.assets[chosen_name]
+                
+                # Attempt to find a non-overlapping position (try 10 times)
+                for _ in range(10):
+                    # Calculate max possible scale to ensure we check bounds correctly
+                    # (approximate, assuming max scale is 1.5)
+                    max_w = int(img.get_width() * 1.5)
+                    max_h = int(img.get_height() * 1.5)
+                    
+                    max_x = max(0, screen_width - max_w)
+                    max_y = max(0, screen_height - max_h)
+                    
+                    x = random.randint(0, max_x)
+                    y = random.randint(0, max_y)
+                    
+                    # Create a temp rect for collision check
+                    # Note: We don't know exact size until PopEffect is created due to random scale,
+                    # but we can estimate or create the object and discard if invalid.
+                    # For better performance, let's create the object and check.
+                    
+                    new_pop = PopEffect(img, x, y)
+                    
+                    # Check collision with existing pops
+                    collision = False
+                    for p in self.active_pops:
+                        # Add some buffer distance
+                        if new_pop.rect.inflate(20, 20).colliderect(p['obj'].rect):
+                            collision = True
+                            break
+                    
+                    if not collision:
+                        self.active_pops.append({'name': chosen_name, 'obj': new_pop})
+                        break
+
+    def draw(self, surface: pygame.Surface):
+        for p in self.active_pops:
+            p['obj'].draw(surface)
 
 # --- Functions ---
 
@@ -109,6 +239,9 @@ def update_button_layout(theme: str, play_btn: ImageButton, settings_btn: ImageB
 # Load settings and background
 current_settings: dict[str, Any] = loadsConfig()
 background: pygame.Surface = resources(current_settings['themes'])
+
+# Initialize PopManager for BubblePencil effects
+pop_manager = PopManager()
 
 # --- Main Menu Buttons ---
 btn_x: int = (SCREEN_WIDTH - 250) // 2 # Initial X for default layout
@@ -277,8 +410,17 @@ while running:
             if event.type == pygame.MOUSEBUTTONDOWN and credits_rect.collidepoint(event.pos):
                 CreditsSurface(screen, background.copy())
 
+    # --- Updates ---
+    if current_settings['themes'] == 'BubblePencil' and not confirming_quit:
+        pop_manager.load_assets() # Will do nothing if already loaded
+        pop_manager.update(SCREEN_WIDTH, SCREEN_HIGH)
+
     # --- Drawing ---
     screen.blit(background, (0, 0))
+    
+    # Draw BubblePencil effects (behind buttons)
+    if current_settings['themes'] == 'BubblePencil' and not confirming_quit:
+        pop_manager.draw(screen)
     
     # Draw main menu buttons
     play_btn.draw(screen)
