@@ -6,12 +6,13 @@ class Input:
     """
     A simple text input box UI component.
     Handles text entry, backspace, and cursor blinking.
-    Currently configured to only accept digits.
+    Can be configured for numeric-only or alphanumeric input.
     """
     
     def __init__(self, x: int, y: int, width: int, height: int, text: str = '', font: Optional[pygame.font.Font] = None, 
                  bg_color: Any = (255, 255, 255), text_color: Any = (0, 0, 0), 
-                 active_color: Any = (200, 200, 255), border_color: Any = (100, 100, 100)):
+                 active_color: Any = (200, 200, 255), border_color: Any = (100, 100, 100),
+                 numeric_only: bool = True):
         """
         Initializes the Input box.
 
@@ -26,6 +27,7 @@ class Input:
             text_color: The color of the text and cursor.
             active_color: The background color when active (clicked on).
             border_color: The color of the box's border.
+            numeric_only: If True, only allows digits. If False, allows text.
         """
         
         self.rect: pygame.Rect = pygame.Rect(x, y, width, height)
@@ -36,6 +38,7 @@ class Input:
         self.text_color: Any = text_color
         self.active_color: Any = active_color
         self.border_color: Any = border_color
+        self.numeric_only: bool = numeric_only
         
         self.active: bool = False # True if the user clicked on the box
         self.text_surface: pygame.Surface = self.font.render(text, True, self.text_color)
@@ -97,8 +100,15 @@ class Input:
                 value_changed = True # Signal that user confirmed input
             elif event.key == pygame.K_BACKSPACE:
                 self.text = self.text[:-1]
-            elif event.unicode.isdigit(): # --- NOTE: Only accepts digits ---
-                self.text += event.unicode
+            else:
+                # Filter input based on configuration
+                if self.numeric_only:
+                    if event.unicode.isdigit():
+                        self.text += event.unicode
+                else:
+                    # Allow generic text input (filtering control chars)
+                    if len(event.unicode) > 0 and event.unicode.isprintable():
+                        self.text += event.unicode
             
             # Re-render text surface and reset cursor
             self.text_surface = self.font.render(self.text, True, self.text_color)
@@ -138,14 +148,11 @@ class Input:
         text_rect: pygame.Rect = self.text_surface.get_rect(midleft=(self.rect.x + 5, self.rect.centery))
         
         # --- Clipping to keep text inside the box ---
-        clipping_rect: pygame.Rect = self.rect.inflate(-10, -10) # 5px padding
+        clipping_rect: pygame.Rect = self.rect.inflate(-4, -4) # Padding
         old_clip: Optional[pygame.Rect] = screen.get_clip()
         screen.set_clip(clipping_rect)
         
         screen.blit(self.text_surface, text_rect)
-        
-        screen.set_clip(old_clip) # Restore original clipping
-        # --- End Clipping ---
         
         # --- Draw Cursor ---
         if self.active:
@@ -158,14 +165,13 @@ class Input:
             if self.cursor_visible:
                 # Position cursor at the end of the text
                 cursor_x: int = text_rect.right + 2
-                # Clamp cursor position inside the box
-                if cursor_x > self.rect.right - 5:
-                    cursor_x = self.rect.right - 5
                 
-                # Ensure cursor doesn't draw outside the clipping area
-                if cursor_x > clipping_rect.right:
-                    cursor_x = clipping_rect.right
+                # Ensure cursor draws even if text is empty
+                if len(self.text) == 0:
+                    cursor_x = self.rect.x + 5
 
                 pygame.draw.line(screen, self.text_color, 
                                  (cursor_x, self.rect.top + 5), 
                                  (cursor_x, self.rect.bottom - 5), 2)
+        
+        screen.set_clip(old_clip)

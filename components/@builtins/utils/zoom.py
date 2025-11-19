@@ -87,13 +87,6 @@ class ZoomTool:
     @classmethod
     def canvas_set_zoom(cls: Any, instance: 'ZoomTool', context: Dict[str, Any], new_zoom: float, pivot_pos: Vector2DLike) -> None:
         """
-Module-level docstring for the main application file.
-This script initializes the main menu of the DrawingGuess game,
-handles navigation between surfaces (Play, Settings, Credits),
-and manages the main game loop, including theme switching
-and the quit-confirmation dialog.
-"""
-        """
         Class method wrapper for _set_zoom to be injected into the canvas.
         Allows other tools or the canvas itself to request a zoom change.
         """
@@ -283,6 +276,29 @@ and the quit-confirmation dialog.
                     pan_start_offset_tuple[1] + delta_y
                 )
                 return True # Event handled
+        
+        # --- NEW: Pinch-to-Zoom (Trackpad) ---
+        # This event handles multi-finger pinch gestures
+        if event.type == pygame.MULTIGESTURE:
+            if event.pinched: # A non-zero/non-one value indicates a pinch
+                current_zoom: float = context["zoom_level"]
+                # event.pinched is a relative multiplier (e.g., 1.1x or 0.9x)
+                new_zoom: float = current_zoom * event.pinched 
+                
+                # Get screen dimensions from context
+                screen_width: int = context["screen"].get_width()
+                screen_height: int = context["screen"].get_height()
+                
+                # Convert normalized gesture center (0.0-1.0) to screen pixels
+                # This is the pivot point for the zoom
+                pivot_pos: Tuple[float, float] = (
+                    event.x * screen_width,
+                    event.y * screen_height
+                )
+                
+                self._set_zoom(context, new_zoom, pivot_pos)
+                return True # Event handled
+        # --- End of new code ---
 
         # Event: Zoom (Mouse wheel scroll).
         if event.type == pygame.MOUSEWHEEL:

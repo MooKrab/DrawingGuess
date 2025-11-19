@@ -2,7 +2,7 @@ import sys
 import pygame
 from typing import Any, Dict
 from libs.common.components import SolidButton, ImageButton
-from ..projects.canvas import surface as canvasSurface
+from ..projects import canvasSurface, quickSurface
 from libs.utils.configs import loadsConfig
 from libs.utils.pylog import Logger
 
@@ -108,20 +108,19 @@ def surface(screen: pygame.Surface, background: pygame.Surface) -> None:
                     current_view = "file" # Go to file menu
                 
                 if quick_btn.is_clicked(event):
-                    # TODO: "QuickInk" mode not implemented, placeholder goes to file menu
-                    current_view = "file"
+                    quickSurface(screen, background, False)
                 
             elif current_view == "file":
                 # --- File View Events ---
                 if new_whiteboard_btn.is_clicked(event):
                     logger.info("Opening new whiteboard...")
                     # Launch canvas with a new, blank whiteboard
-                    canvasSurface(screen, background, open_file_on_start=False)
+                    canvasSurface(screen, background, False)
                 
                 if open_file_btn.is_clicked(event):
                     logger.info("Opening whiteboard with file dialog...")
                     # Launch canvas and trigger the "open file" dialog
-                    canvasSurface(screen, background, open_file_on_start=True)
+                    canvasSurface(screen, background, True)
                 
                 if back_file_btn.is_clicked(event):
                     current_view = "mode" # Go back to mode menu
