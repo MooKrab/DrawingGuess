@@ -401,6 +401,7 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
                             target_word = random.choice(roll_words_pool)
                             roll_speed = 30
                             roll_timer = current_time
+                            roll_current_index = 0 # <--- RESET INDEX HERE
                 continue
 
             elif game_state == "WORD_ROLLING":

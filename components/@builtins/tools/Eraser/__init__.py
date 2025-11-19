@@ -1,6 +1,5 @@
 import pygame
 from libs.common.components import SolidButton, SolidSlider, InputBox
-import math
 from typing import Any, Dict, Optional, Tuple
 
 # Defines the EraserTool for erasing on the canvas.
@@ -39,7 +38,7 @@ class EraserTool:
             min_val=1, max_val=40, initial_val=50
         )
         self.input_box: InputBox = InputBox(
-            x=self.modal_rect.x + 130, y=self.modal_rect.y + 25,
+            x=self.modal_rect.x + 180, y=self.modal_rect.y + 25,
             width=70, height=30, text='50'
         )
         self.font: pygame.font.Font
@@ -85,7 +84,7 @@ class EraserTool:
         mouse_pos: Tuple[int, int] = context.get("mouse_pos")
 
         # Event: Click on the tool's button in the toolbar.
-        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == True:
             if self.button.rect.collidepoint(event.pos):
                 context["active_tool_id"] = self.registryId
                 
