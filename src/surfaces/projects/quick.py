@@ -166,12 +166,12 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
     # 5. Result UI
     play_again_btn = SolidButton(
         screen_width // 2 - 160, screen_height // 2 + 50,
-        150, 50, "Play", bg_color=(0, 200, 0), text_color="White"
+        150, 50, "Again", bg_color=(0, 200, 0), text_color="White"
     )
     
     main_menu_btn = SolidButton(
         screen_width // 2 + 10, screen_height // 2 + 50,
-        150, 50, "Menu", bg_color=(200, 0, 0), text_color="White"
+        150, 50, "Back", bg_color=(200, 0, 0), text_color="White"
     )
 
     # Fonts
@@ -216,6 +216,16 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
         for tool in utility_tools_to_draw:
             if hasattr(tool, 'slider'):
                 tool.slider.set_value(fit_zoom)
+
+    def undo_action() -> None:
+        """Undoes the last action and updates the canvas."""
+        new_surface = canvas.undo()
+        update_canvas_state(new_surface)
+
+    def redo_action() -> None:
+        """Redoes the last action and updates the canvas."""
+        new_surface = canvas.redo()
+        update_canvas_state(new_surface)
 
     # --- Shared Context ---
     shared_tool_context = {
@@ -349,6 +359,31 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
             if event.type == pygame.QUIT:
                 running = False
                 continue
+            
+            # --- Keyboard Shortcuts (Global or State-Specific) ---
+            if game_state == "DRAWING" and event.type == pygame.KEYDOWN:
+                mods = pygame.key.get_mods()
+                is_ctrl_or_cmd = bool(mods & pygame.KMOD_CTRL or mods & pygame.KMOD_META)
+                is_shift = bool(mods & pygame.KMOD_SHIFT)
+                
+                # Undo (Ctrl+Z)
+                if event.key == pygame.K_z and is_ctrl_or_cmd and not is_shift:
+                    undo_action()
+                # Redo (Ctrl+Y or Ctrl+Shift+Z)
+                elif (event.key == pygame.K_y and is_ctrl_or_cmd) or (event.key == pygame.K_z and is_ctrl_or_cmd and is_shift):
+                    redo_action()
+                
+                # Pan shortcut
+                if event.key == pygame.K_SPACE:
+                     if hand_tool_id[0] and shared_tool_context["active_tool_id"] != hand_tool_id[0]:
+                         shared_tool_context["previous_tool_id"] = shared_tool_context["active_tool_id"]
+                         shared_tool_context["active_tool_id"] = hand_tool_id[0]
+            
+            if game_state == "DRAWING" and event.type == pygame.KEYUP:
+                if event.key == pygame.K_SPACE:
+                    if hand_tool_id[0] and shared_tool_context["active_tool_id"] == hand_tool_id[0]:
+                         shared_tool_context["active_tool_id"] = shared_tool_context["previous_tool_id"]
+                         shared_tool_context["is_panning"] = False
 
             # Handle UI Clicks depending on State
             
@@ -476,19 +511,11 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
                 if not shared_tool_context["click_on_ui"]:
                     active_tool_instance = tool_id_to_instance.get(shared_tool_context.get("active_tool_id"))
                     if active_tool_instance:
-                        is_space_up = (event.type == pygame.KEYUP and event.key == pygame.K_SPACE)
-                        if not is_space_up:
-                            if active_tool_instance.handle_event(event, shared_tool_context):
-                                if event in events: events.remove(event)
-            
-            if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
-                 if hand_tool_id[0] and shared_tool_context["active_tool_id"] != hand_tool_id[0]:
-                     shared_tool_context["previous_tool_id"] = shared_tool_context["active_tool_id"]
-                     shared_tool_context["active_tool_id"] = hand_tool_id[0]
-            elif event.type == pygame.KEYUP and event.key == pygame.K_SPACE:
-                if hand_tool_id[0] and shared_tool_context["active_tool_id"] == hand_tool_id[0]:
-                     shared_tool_context["active_tool_id"] = shared_tool_context["previous_tool_id"]
-                     shared_tool_context["is_panning"] = False
+                        # Only handle if NOT a keyboard event we already processed
+                        if not (event.type == pygame.KEYUP and event.key == pygame.K_SPACE) and \
+                           not (event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE):
+                                if active_tool_instance.handle_event(event, shared_tool_context):
+                                    if event in events: events.remove(event)
 
         # --- Toolbar Position Logic ---
         if game_state == "DRAWING":

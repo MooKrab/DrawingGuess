@@ -16,11 +16,11 @@ CREDITS_DATA: List[Tuple[Any, ...]] = [
     ("", 60, "spacer"),
 
     ("Programmer", 40, "center"),
-    ("Suphakorn Khamwongsa", "@notplai", 30, "columns"),
+    ("Suphakorn Khamwongsa", "", 30, "columns"),
     ("", 30, "spacer"),
 
     ("Artists", 40, "center"),
-    ("Sorawit Nuamwat", "@sorwit_ball", 30, "columns"),
+    ("Sorawit Nuamwat", "", 30, "columns"),
     ("", 30, "spacer"),
 
     ("Designer", 40, "center"),
@@ -28,15 +28,16 @@ CREDITS_DATA: List[Tuple[Any, ...]] = [
     ("", 30, "spacer"),
 
     ("Tester", 40, "center"),
-    ("Sorawit Nuamwat", "Sota", 30, "columns"),
-    ("Idea", "Pai", 30, "columns"),
-    ("Tan", "Ken", 30, "columns"),
+    ("Sorawit Nuamwat", "", 30, "columns"),
+    ("", "", 30, "columns"),
+    ("", "", 30, "columns"),
     ("", 30, "spacer"),
 
     ("Special Thanks", 40, "center"),
     ("Coffee", "Iced Green Tea", 30, "columns"),
     ("Taiwan Milk Tea", "Iced Matcha Latte", 30, "columns"),
-    ("Google Vertex", "Google Gemini", 30, "columns"),
+    ("UCompiler", "Google Gemini 3", 30, "columns"),
+    ("Pygame CE", "Stack Overflow", 30, "columns"),
     ("", 60, "spacer"),
 
     # Spacers to push "Thanks for playing!" off-screen
