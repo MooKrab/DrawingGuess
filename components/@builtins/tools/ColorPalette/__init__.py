@@ -173,6 +173,13 @@ class ColorPalette:
         except:
             self.font = pygame.font.Font(None, 22)
 
+    def get_cursor_draw_info(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Provides information for drawing the cursor.
+        For the ColorPalette, we just use the default system cursor.
+        """
+        return {"type": "custom", "radius": 0, "color": None}
+
     # Adds a color to the "recent colors" list.
     def add_recent_color(self, color: Tuple[int, int, int]) -> None:
         """

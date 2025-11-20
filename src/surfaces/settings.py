@@ -4,6 +4,7 @@ from typing import Any, Dict, Callable, Optional
 from libs.utils.configs import loadsConfig, savesConfig
 from libs.common.components import SolidButton, SolidBox, SolidDropDown, ImageButton
 from libs.utils.pylog import Logger
+from libs.utils.music import get_music_manager
 
 logger = Logger(__name__)
 
@@ -115,11 +116,18 @@ def surface(screen: pygame.Surface, background: pygame.Surface,
                 background = load_background_image_func(settings['themes'])
                 back_btn.reload_image(settings['themes'])
                 
-                continue # Event handled
+                # --- NEW: Apply music default immediately ---
+                get_music_manager().update(settings['music'])
+                
+                continue 
 
             # Event: Click Music checkbox
             if music_checkbox.handle_event(event):
                 settings['music'] = music_checkbox.checked
+                
+                # [MISSING LINE] Update the music manager immediately
+                get_music_manager().update(settings['music'])
+                
                 continue # Event handled
 
         # --- Drawing ---

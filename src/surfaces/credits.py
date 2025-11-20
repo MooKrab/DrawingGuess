@@ -12,7 +12,7 @@ CREDITS_DATA: List[Tuple[Any, ...]] = [
     ("", 30, "spacer"),
 
     ("A Game By", 40, "center"),
-    ("ABC Team", 50, "center"),
+    ("MooKrab.org", 50, "center"),
     ("", 60, "spacer"),
 
     ("Programmer", 40, "center"),
@@ -28,7 +28,7 @@ CREDITS_DATA: List[Tuple[Any, ...]] = [
     ("", 30, "spacer"),
 
     ("Tester", 40, "center"),
-    ("Sorawit Nuamwat", "", 30, "columns"),
+    ("Sorawit Nuamwat", "Wortawich Woraphithakkun", 30, "columns"),
     ("", 30, "spacer"),
 
     ("Special Thanks", 40, "center"),

@@ -491,11 +491,12 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
 
                 # Handle window close
                 if event.type == pygame.QUIT:
-                    if canvas.is_dirty:
-                        set_dialog("confirm_action", "exit")
-                        shared_tool_context["click_on_ui"] = True
-                    else:
-                        running = False
+                    running = False
+                    # if canvas.is_dirty:
+                    #     set_dialog("confirm_action", "exit")
+                    #     shared_tool_context["click_on_ui"] = True
+                    # else:
+                    #     running = False
                 
                 # If a previous handler consumed the event, skip
                 if shared_tool_context["click_on_ui"]:
@@ -547,12 +548,27 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
                     continue
                 
                 # --- Keyboard Shortcuts ---
+# --- Keyboard Shortcuts ---
                 if event.type == pygame.KEYDOWN:
-                    mods: int = pygame.key.get_mods()
+                    mods = pygame.key.get_mods()
                     is_ctrl_or_cmd: bool = bool(mods & pygame.KMOD_CTRL or mods & pygame.KMOD_META)
                     is_shift: bool = bool(mods & pygame.KMOD_SHIFT)
                     
                     active_tool_id: Optional[str] = shared_tool_context["active_tool_id"]
+                    
+                    # --- NEW: Number Keys for Tool Selection ---
+                    if not is_ctrl_or_cmd:
+                        tool_index = -1
+                        if pygame.K_1 <= event.key <= pygame.K_9:
+                            tool_index = event.key - pygame.K_1
+                        elif event.key == pygame.K_0:
+                            tool_index = 9
+                        
+                        if 0 <= tool_index < len(loaded_tool_instances):
+                            selected_tool = loaded_tool_instances[tool_index]
+                            shared_tool_context["active_tool_id"] = selected_tool.registryId
+                            shared_tool_context["menu_open"] = None
+                            shared_tool_context["click_on_ui"] = True
                     
                     # Spacebar: Hold to pan
                     if hand_tool_id[0] and event.key == pygame.K_SPACE:
@@ -647,8 +663,9 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
                                 elif btn.text == "Export as... (.png)":
                                     export_as_image_action()
                                 elif btn.text == "Back to Main Menu": 
-                                    if canvas.is_dirty: set_dialog("confirm_action", "exit")
-                                    else: running = False
+                                    running = False
+                                    # if canvas.is_dirty: set_dialog("confirm_action", "exit")
+                                    # else: running = False
                                 
                                 shared_tool_context["menu_open"] = None 
                                 shared_tool_context["click_on_ui"] = True

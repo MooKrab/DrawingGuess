@@ -19,6 +19,7 @@ from libs.common.components import ImageButton
 from libs.utils.configs import loadsConfig
 from libs.common.kits import resources
 from libs.utils.pylog import Logger
+from libs.utils.music import get_music_manager
 
 logger = Logger(__name__)
 
@@ -240,6 +241,9 @@ def update_button_layout(theme: str, play_btn: ImageButton, settings_btn: ImageB
 current_settings: dict[str, Any] = loadsConfig()
 background: pygame.Surface = resources(current_settings['themes'])
 
+# Initialize and play music based on settings
+get_music_manager().update(current_settings['music'])
+
 # Initialize PopManager for BubblePencil effects
 pop_manager = PopManager()
 
@@ -333,7 +337,7 @@ except FileNotFoundError:
 
 credits_font_underlined.set_underline(True)
 
-credits_text: str = "ABC Team"
+credits_text: str = "MooKrab.org"
 credits_color: tuple[int, int, int] = (50, 50, 50)
 credits_surf_normal: pygame.Surface = credits_font.render(credits_text, True, credits_color)
 credits_surf_underlined: pygame.Surface = credits_font_underlined.render(credits_text, True, credits_color)

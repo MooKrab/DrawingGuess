@@ -9,6 +9,9 @@ from libs.utils.pylog import Logger
 # Import the new canvas manager
 from libs.common.screens import canvasSurface
 
+from libs.utils.configs import loadsConfig
+from libs.utils.music import get_music_manager
+
 logger = Logger(__name__)
 
 # --- Utility Functions ---
@@ -43,8 +46,8 @@ HISTORY_MENU_PADDING: int = 5
 HISTORY_ITEM_HEIGHT: int = 25
 MAX_VISIBLE_HISTORY_ITEMS: int = 10 
 
-GAME_DURATION_MS: int = 2 * 60 * 1000 # 2 minutes
-SUBMIT_BTN_SHOW_TIME_MS: int = 30 * 1000 # Show button when 30s remaining
+GAME_DURATION_MS: int = 40 * 1000 # 1 minutes
+SUBMIT_BTN_SHOW_TIME_MS: int = 20 * 1000 # Show button when 30s remaining
 
 # --- Main Application Function ---
 
@@ -55,6 +58,9 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
     screen_width: int = screen.get_width()
     screen_height: int = screen.get_height()
     
+    settings = loadsConfig()
+    get_music_manager().update(settings.get('music', True))
+
     # --- Quick Game State Variables ---
     # States: CATEGORY_SELECT, WORD_ROLLING, WORD_REVEAL, DRAWING, GUESSING, CHECKING_GUESS, RESULT
     game_state: str = "CATEGORY_SELECT"
@@ -365,6 +371,25 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
                 mods = pygame.key.get_mods()
                 is_ctrl_or_cmd = bool(mods & pygame.KMOD_CTRL or mods & pygame.KMOD_META)
                 is_shift = bool(mods & pygame.KMOD_SHIFT)
+                
+                # --- NEW: Number Keys for Tool Selection ---
+                if not is_ctrl_or_cmd: # Avoid conflict with other shortcuts
+                    tool_index = -1
+                    if pygame.K_1 <= event.key <= pygame.K_9:
+                        tool_index = event.key - pygame.K_1
+                    elif event.key == pygame.K_0:
+                        tool_index = 9
+                    
+                    if 0 <= tool_index < len(loaded_tool_instances):
+                        selected_tool = loaded_tool_instances[tool_index]
+                        shared_tool_context["active_tool_id"] = selected_tool.registryId
+                        shared_tool_context["menu_open"] = None # Close any open menus
+                        shared_tool_context["click_on_ui"] = True
+                # -------------------------------------------
+
+                # Undo (Ctrl+Z)
+                if event.key == pygame.K_z and is_ctrl_or_cmd and not is_shift:
+                    undo_action()
                 
                 # Undo (Ctrl+Z)
                 if event.key == pygame.K_z and is_ctrl_or_cmd and not is_shift:
