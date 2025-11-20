@@ -46,8 +46,8 @@ HISTORY_MENU_PADDING: int = 5
 HISTORY_ITEM_HEIGHT: int = 25
 MAX_VISIBLE_HISTORY_ITEMS: int = 10 
 
-GAME_DURATION_MS: int = 40 * 1000 # 1 minutes
-SUBMIT_BTN_SHOW_TIME_MS: int = 20 * 1000 # Show button when 30s remaining
+GAME_DURATION_MS: int = 40 * 1000
+SUBMIT_BTN_SHOW_TIME_MS: int = 25 * 1000
 
 # --- Main Application Function ---
 
@@ -365,7 +365,7 @@ def surface(screen: pygame.Surface, background: pygame.Surface, open_file_on_sta
             if event.type == pygame.QUIT:
                 running = False
                 continue
-            
+
             # --- Keyboard Shortcuts (Global or State-Specific) ---
             if game_state == "DRAWING" and event.type == pygame.KEYDOWN:
                 mods = pygame.key.get_mods()
